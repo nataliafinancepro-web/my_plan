@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Планировщик задач</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">План на день</p>
+        <h1>Планировщик задач</h1>
+        <time class="selected-date" datetime="2026-05-22">22 мая 2026</time>
+      </div>
+      <button class="button button-secondary today-button" type="button">Сегодня</button>
+    </header>
+
+    <section class="panel week-panel" aria-labelledby="week-title">
+      <div class="section-heading">
+        <h2 id="week-title">Компактная неделя</h2>
+      </div>
+      <div class="week-strip" aria-label="Дни недели"></div>
+    </section>
+
+    <section class="panel progress-panel" aria-labelledby="progress-title">
+      <div class="section-heading">
+        <h2 id="progress-title">Прогресс недели</h2>
+        <span class="muted progress-percent">0%</span>
+      </div>
+      <div class="progress-track" aria-hidden="true">
+        <span class="progress-fill"></span>
+      </div>
+      <p class="panel-note progress-summary">Прогресс недели: 0% (0 из 0 задач выполнено)</p>
+    </section>
+
+    <section class="panel task-panel" aria-labelledby="add-task-title">
+      <div class="section-heading">
+        <h2 id="add-task-title">Новая задача</h2>
+      </div>
+      <form class="task-form">
+        <input
+          class="task-input"
+          type="text"
+          maxlength="300"
+          placeholder="Новая задача..."
+          aria-label="Текст новой задачи"
+        >
+        <select class="task-select" aria-label="Приоритет задачи">
+          <option value="high">High</option>
+          <option value="medium" selected>Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <select class="task-select" aria-label="Повторение задачи">
+          <option value="none" selected>None</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+        </select>
+        <button class="button button-primary" type="submit">Добавить</button>
+      </form>
+    </section>
+
+    <section class="panel tasks-current" aria-labelledby="tasks-title">
+      <div class="section-heading">
+        <h2 id="tasks-title">Задачи на сегодня</h2>
+        <span class="muted task-count">0 задач</span>
+      </div>
+      <div class="task-list" aria-live="polite"></div>
+    </section>
+
+    <section class="backlog-section" aria-labelledby="backlog-title">
+      <button class="backlog-toggle" type="button" aria-expanded="false" aria-controls="backlog">
+        <span class="backlog-toggle-label">Открыть Бэклог</span>
+        <span class="backlog-badge" aria-label="Просроченные задачи" hidden>0</span>
+      </button>
+      <div class="panel backlog" id="backlog" hidden>
+        <div class="section-heading">
+          <h2 id="backlog-title">Бэклог</h2>
+          <span class="muted">Скрытый контейнер</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
