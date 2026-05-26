@@ -21,47 +21,18 @@
       <div class="section-heading">
         <h2 id="week-title">Компактная неделя</h2>
       </div>
-      <div class="week-strip" aria-label="Дни недели">
-        <button class="day-pill is-active" type="button">
-          <span>Пн</span>
-          <strong>18</strong>
-        </button>
-        <button class="day-pill" type="button">
-          <span>Вт</span>
-          <strong>19</strong>
-        </button>
-        <button class="day-pill" type="button">
-          <span>Ср</span>
-          <strong>20</strong>
-        </button>
-        <button class="day-pill" type="button">
-          <span>Чт</span>
-          <strong>21</strong>
-        </button>
-        <button class="day-pill" type="button">
-          <span>Пт</span>
-          <strong>22</strong>
-        </button>
-        <button class="day-pill" type="button">
-          <span>Сб</span>
-          <strong>23</strong>
-        </button>
-        <button class="day-pill" type="button">
-          <span>Вс</span>
-          <strong>24</strong>
-        </button>
-      </div>
+      <div class="week-strip" aria-label="Дни недели"></div>
     </section>
 
     <section class="panel progress-panel" aria-labelledby="progress-title">
       <div class="section-heading">
         <h2 id="progress-title">Прогресс недели</h2>
-        <span class="muted">Заглушка</span>
+        <span class="muted progress-percent">0%</span>
       </div>
       <div class="progress-track" aria-hidden="true">
         <span class="progress-fill"></span>
       </div>
-      <p class="panel-note">Выполнено 0 из 0 задач</p>
+      <p class="panel-note progress-summary">Прогресс недели: 0% (0 из 0 задач выполнено)</p>
     </section>
 
     <section class="panel task-panel" aria-labelledby="add-task-title">
@@ -100,13 +71,37 @@
 
     <section class="backlog-section" aria-labelledby="backlog-title">
       <button class="backlog-toggle" type="button" aria-expanded="false" aria-controls="backlog">
-        Открыть Бэклог
+        <span class="backlog-toggle-label">Открыть Бэклог</span>
+        <span class="backlog-badge" aria-label="Просроченные задачи" hidden>0</span>
       </button>
       <div class="panel backlog" id="backlog" hidden>
         <div class="section-heading">
           <h2 id="backlog-title">Бэклог</h2>
           <span class="muted">Скрытый контейнер</span>
         </div>
+      </div>
+    </section>
+
+    <section class="balance-section" aria-labelledby="balance-title">
+      <button class="balance-toggle" type="button" aria-expanded="false" aria-controls="balance">
+        <span class="balance-toggle-label">Цели и Баланс</span>
+      </button>
+      <div class="panel balance" id="balance" hidden>
+        <div class="section-heading">
+          <h2 id="balance-title">Цели и Баланс</h2>
+          <span class="muted balance-summary">0 сфер</span>
+        </div>
+        <form class="sphere-form">
+          <input
+            class="sphere-input"
+            type="text"
+            maxlength="80"
+            placeholder="Новая сфера..."
+            aria-label="Название новой сферы"
+          >
+          <button class="button button-primary" type="submit">Добавить сферу</button>
+        </form>
+        <div class="spheres-list" aria-live="polite"></div>
       </div>
     </section>
   </main>
