@@ -3,6 +3,9 @@ const SETTINGS_STORAGE_KEY = "planner.settings";
 const SPHERES_STORAGE_KEY = "planner.spheres";
 const GOALS_STORAGE_KEY = "planner.goals";
 const STORAGE_READ_ERROR_MESSAGE = "Данные не удалось прочитать. Создано новое пустое хранилище.";
+let activeBalanceSphereId = null;
+let currentPeriodStart = getTodayLocalDateString();
+let currentPeriodEnd = getTodayLocalDateString();
 
 function getTodayLocalDateString(date = new Date()) {
   const year = date.getFullYear();
@@ -193,19 +196,11 @@ function formatLocalDateString(date) {
   return `${year}-${month}-${day}`;
 }
 
-function addLocalDays(date, days) {
-  const result = new Date(date);
+function getActivePeriodRange() {
+  const start = currentPeriodStart <= currentPeriodEnd ? currentPeriodStart : currentPeriodEnd;
+  const end = currentPeriodStart <= currentPeriodEnd ? currentPeriodEnd : currentPeriodStart;
 
-  result.setDate(result.getDate() + days);
-  return result;
-}
-
-function getMondayOfWeek(dateString) {
-  const date = parseLocalDate(dateString);
-  const dayIndex = date.getDay();
-  const mondayOffset = dayIndex === 0 ? -6 : 1 - dayIndex;
-
-  return addLocalDays(date, mondayOffset);
+  return { start, end };
 }
 
 function formatSelectedDate(dateString) {
@@ -265,7 +260,7 @@ function getStatusLabel(status) {
   return labels[status] || labels.todo;
 }
 
-function createTask({ text, selectedDate, priority, repeatType }) {
+function createTask({ text, selectedDate, priority, repeatType, goalId = null }) {
   const now = new Date().toISOString();
   const normalizedRepeatType = repeatType === "none" ? null : repeatType;
 
@@ -277,6 +272,7 @@ function createTask({ text, selectedDate, priority, repeatType }) {
     priority,
     isRecurring: normalizedRepeatType !== null,
     repeatType: normalizedRepeatType,
+    goalId,
     parentTaskId: null,
     createdAt: now,
     updatedAt: now,
@@ -339,6 +335,7 @@ function createRecurringTaskCopy(sourceTask, rootId, targetDate) {
     priority: sourceTask.priority || "medium",
     isRecurring: true,
     repeatType: sourceTask.repeatType,
+    goalId: sourceTask.goalId || null,
     parentTaskId: rootId,
     createdAt: now,
     updatedAt: now,
@@ -460,58 +457,11 @@ function renderSelectedDate(dateString) {
   selectedDate.textContent = formatSelectedDate(dateString);
 }
 
-function renderWeek(selectedDate, onSelectDate) {
-  const weekStrip = document.querySelector(".week-strip");
-
-  if (!weekStrip) {
-    return;
-  }
-
-  const weekDayLabels = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-  const today = getTodayLocalDateString();
-  const weekStart = getMondayOfWeek(selectedDate);
-
-  weekStrip.textContent = "";
-
-  weekDayLabels.forEach((label, index) => {
-    const date = addLocalDays(weekStart, index);
-    const dateString = formatLocalDateString(date);
-    const dayButton = document.createElement("button");
-    const weekDay = document.createElement("span");
-    const dayNumber = document.createElement("strong");
-
-    dayButton.type = "button";
-    dayButton.className = "day-pill";
-    dayButton.dataset.date = dateString;
-    dayButton.setAttribute("aria-label", `${label}, ${formatSelectedDate(dateString)}`);
-
-    if (dateString === selectedDate) {
-      dayButton.classList.add("is-selected");
-      dayButton.setAttribute("aria-current", "date");
-    }
-
-    if (dateString === today) {
-      dayButton.classList.add("is-today");
-    }
-
-    weekDay.textContent = label;
-    dayNumber.textContent = String(date.getDate());
-
-    dayButton.append(weekDay, dayNumber);
-    dayButton.addEventListener("click", () => {
-      onSelectDate(dateString);
-    });
-    weekStrip.append(dayButton);
-  });
-}
-
-function calculateWeekProgress(tasks, selectedDate) {
-  const weekStart = getMondayOfWeek(selectedDate);
-  const weekStartString = formatLocalDateString(weekStart);
-  const weekEndString = formatLocalDateString(addLocalDays(weekStart, 6));
+function calculatePeriodProgress(tasks) {
+  const { start, end } = getActivePeriodRange();
   const relevantTasks = tasks.filter((task) => (
-    task.date >= weekStartString
-    && task.date <= weekEndString
+    task.date >= start
+    && task.date <= end
     && task.status !== "cancelled"
     && task.deleted !== true
     && task.isDeleted !== true
@@ -529,11 +479,11 @@ function calculateWeekProgress(tasks, selectedDate) {
   };
 }
 
-function renderWeekProgress(tasks, selectedDate) {
+function renderWeekProgress(tasks) {
   const progressFill = document.querySelector(".progress-fill");
   const progressPercent = document.querySelector(".progress-percent");
   const progressSummary = document.querySelector(".progress-summary");
-  const { progress, doneTasks, totalRelevantTasks } = calculateWeekProgress(tasks, selectedDate);
+  const { progress, doneTasks, totalRelevantTasks } = calculatePeriodProgress(tasks);
 
   if (progressFill) {
     progressFill.style.width = `${progress}%`;
@@ -544,7 +494,42 @@ function renderWeekProgress(tasks, selectedDate) {
   }
 
   if (progressSummary) {
-    progressSummary.textContent = `Прогресс недели: ${progress}% (${doneTasks} из ${totalRelevantTasks} задач выполнено)`;
+    progressSummary.textContent = `Прогресс периода: ${progress}% (${doneTasks} из ${totalRelevantTasks} задач выполнено)`;
+  }
+}
+
+function renderPeriodSummary(tasks, goals) {
+  const { start, end } = getActivePeriodRange();
+  const goalsCount = goals.filter((goal) => (
+    goal.deadline && goal.deadline >= start && goal.deadline <= end
+  )).length;
+  const periodTasks = tasks.filter((task) => task.date >= start && task.date <= end);
+  const doneTasks = periodTasks.filter((task) => task.status === "done").length;
+  const openTasks = periodTasks.filter((task) => task.status !== "done" && task.status !== "cancelled").length;
+  const goalsNode = document.querySelector(".goals-deadline-count");
+  const totalNode = document.querySelector(".period-total-tasks");
+  const doneNode = document.querySelector(".period-done-tasks");
+  const openNode = document.querySelector(".period-open-tasks");
+  const labelNode = document.querySelector(".period-label");
+
+  if (goalsNode) {
+    goalsNode.textContent = String(goalsCount);
+  }
+
+  if (totalNode) {
+    totalNode.textContent = String(periodTasks.length);
+  }
+
+  if (doneNode) {
+    doneNode.textContent = String(doneTasks);
+  }
+
+  if (openNode) {
+    openNode.textContent = String(openTasks);
+  }
+
+  if (labelNode) {
+    labelNode.textContent = `${start} - ${end}`;
   }
 }
 
@@ -552,7 +537,9 @@ function saveAndRenderTasks(tasks, selectedDate) {
   saveTasks(tasks);
   renderTasks(tasks, selectedDate);
   renderBacklog(tasks, selectedDate);
-  renderWeekProgress(tasks, selectedDate);
+  renderWeekProgress(tasks);
+  renderPeriodSummary(tasks, loadGoals());
+  renderGoalsBalance(loadSpheres(), loadGoals());
 }
 
 function moveTaskToDate({ task, tasks, selectedDate, targetDate }) {
@@ -724,24 +711,123 @@ function saveAndRenderGoalsBalance(spheres, goals) {
   saveSpheres(spheres);
   saveGoals(goals);
   renderGoalsBalance(spheres, goals);
+  renderGoalSelect(spheres, goals);
+  renderPeriodSummary(loadTasks(), goals);
+  renderTasks(loadTasks(), loadSettings().selectedDate);
 }
 
-function createGoal({ sphereId, title, targetValue }) {
+function createGoal({ sphereId, title, deadline }) {
   const now = new Date().toISOString();
 
   return {
     id: generateEntityId("goal"),
     sphereId,
     title,
-    targetValue,
+    deadline,
     createdAt: now,
     updatedAt: now,
   };
 }
 
+function getGoalLabel(goalId, spheres, goals) {
+  if (!goalId) {
+    return null;
+  }
+
+  const goal = goals.find((item) => item.id === goalId);
+
+  if (!goal) {
+    return null;
+  }
+
+  const sphere = spheres.find((item) => item.id === goal.sphereId);
+
+  return sphere ? `${sphere.name}: ${goal.title}` : goal.title;
+}
+
+function calculateGoalProgress(goal, tasks) {
+  const linkedTasks = tasks.filter((task) => task.goalId === goal.id);
+  const doneTasks = tasks.filter((task) => (
+    task.goalId === goal.id && task.status === "done"
+  )).length;
+  const totalTasks = linkedTasks.length;
+  const progress = totalTasks === 0
+    ? 0
+    : Math.round((doneTasks / totalTasks) * 100);
+
+  return {
+    progress,
+    doneTasks,
+    totalTasks,
+  };
+}
+
+function calculateSphereProgress(sphere, goals, tasks) {
+  const sphereGoals = goals.filter((goal) => goal.sphereId === sphere.id);
+  const totalTasks = sphereGoals.reduce((sum, goal) => (
+    sum + calculateGoalProgress(goal, tasks).totalTasks
+  ), 0);
+  const doneTasks = sphereGoals.reduce((sum, goal) => (
+    sum + calculateGoalProgress(goal, tasks).doneTasks
+  ), 0);
+  const progress = totalTasks === 0
+    ? 0
+    : Math.round((doneTasks / totalTasks) * 100);
+
+  return {
+    progress,
+    doneTasks,
+    totalTasks,
+  };
+}
+
+function createBalanceProgressBar(progress) {
+  const track = document.createElement("div");
+  const fill = document.createElement("span");
+  const clampedProgress = Math.max(0, Math.min(progress, 100));
+
+  track.className = "balance-progress-track";
+  fill.className = "balance-progress-fill";
+  fill.style.width = `${clampedProgress}%`;
+  track.append(fill);
+
+  return track;
+}
+
+function renderGoalSelect(spheres, goals) {
+  const goalSelect = document.querySelector(".goal-select");
+
+  if (!goalSelect) {
+    return;
+  }
+
+  const selectedValue = goalSelect.value;
+
+  goalSelect.textContent = "";
+
+  const emptyOption = document.createElement("option");
+  emptyOption.value = "";
+  emptyOption.textContent = "Без цели";
+  goalSelect.append(emptyOption);
+
+  goals.forEach((goal) => {
+    const option = document.createElement("option");
+    const label = getGoalLabel(goal.id, spheres, goals);
+
+    option.value = goal.id;
+    option.textContent = label || goal.title;
+    goalSelect.append(option);
+  });
+
+  goalSelect.value = goals.some((goal) => goal.id === selectedValue) ? selectedValue : "";
+}
+
 function renderGoalsBalance(spheres, goals) {
   const spheresList = document.querySelector(".spheres-list");
   const balanceSummary = document.querySelector(".balance-summary");
+  const tasks = loadTasks();
+
+  renderGoalSelect(spheres, goals);
 
   if (!spheresList) {
     return;
@@ -762,147 +848,182 @@ function renderGoalsBalance(spheres, goals) {
     return;
   }
 
+  if (!activeBalanceSphereId || !spheres.some((sphere) => sphere.id === activeBalanceSphereId)) {
+    activeBalanceSphereId = spheres[0].id;
+  }
+
+  const tabs = document.createElement("div");
+  const activeSphere = spheres.find((sphere) => sphere.id === activeBalanceSphereId);
+  const sphereGoals = goals.filter((goal) => goal.sphereId === activeSphere.id);
+  const sphereProgress = calculateSphereProgress(activeSphere, goals, tasks);
+  const card = document.createElement("article");
+  const header = document.createElement("div");
+  const title = document.createElement("h3");
+  const actions = document.createElement("div");
+  const sphereProgressBlock = document.createElement("div");
+  const sphereProgressText = document.createElement("p");
+  const goalForm = document.createElement("form");
+  const goalTitleInput = document.createElement("input");
+  const goalDeadlineInput = document.createElement("input");
+  const createGoalButton = document.createElement("button");
+  const editSphereButton = document.createElement("button");
+  const deleteSphereButton = document.createElement("button");
+  const goalsList = document.createElement("div");
+
+  tabs.className = "sphere-tabs";
+
   spheres.forEach((sphere) => {
-    const sphereGoals = goals.filter((goal) => goal.sphereId === sphere.id);
-    const card = document.createElement("article");
-    const header = document.createElement("div");
-    const title = document.createElement("h3");
-    const actions = document.createElement("div");
-    const createGoalButton = document.createElement("button");
-    const editSphereButton = document.createElement("button");
-    const deleteSphereButton = document.createElement("button");
-    const goalsList = document.createElement("div");
+    const tab = document.createElement("button");
+    const tabProgress = calculateSphereProgress(sphere, goals, tasks);
 
-    card.className = "sphere-card";
-    header.className = "sphere-header";
-    actions.className = "sphere-actions";
-    goalsList.className = "goal-list";
+    tab.type = "button";
+    tab.className = "sphere-tab";
+    tab.dataset.sphereId = sphere.id;
+    tab.textContent = `${sphere.name} · ${tabProgress.progress}%`;
 
-    title.textContent = sphere.name;
-
-    createGoalButton.type = "button";
-    createGoalButton.className = "task-action";
-    createGoalButton.textContent = "Создать цель";
-    createGoalButton.addEventListener("click", () => {
-      const titleValue = window.prompt("Название цели");
-
-      if (titleValue === null) {
-        return;
-      }
-
-      const goalTitle = titleValue.trim();
-
-      if (!goalTitle) {
-        alert("Введите название цели");
-        return;
-      }
-
-      const targetValueInput = window.prompt("Целевое количество действий");
-
-      if (targetValueInput === null) {
-        return;
-      }
-
-      const targetValue = Number(targetValueInput);
-
-      if (!Number.isFinite(targetValue) || targetValue <= 0) {
-        alert("Введите число больше нуля");
-        return;
-      }
-
-      goals.push(createGoal({
-        sphereId: sphere.id,
-        title: goalTitle,
-        targetValue,
-      }));
-      saveAndRenderGoalsBalance(spheres, goals);
-    });
-
-    editSphereButton.type = "button";
-    editSphereButton.className = "task-action";
-    editSphereButton.textContent = "Редактировать";
-    editSphereButton.addEventListener("click", () => {
-      const nextNameInput = window.prompt("Название сферы", sphere.name);
-
-      if (nextNameInput === null) {
-        return;
-      }
-
-      const nextName = nextNameInput.trim();
-
-      if (!nextName) {
-        alert("Введите название сферы");
-        return;
-      }
-
-      sphere.name = nextName;
-      sphere.updatedAt = new Date().toISOString();
-      saveAndRenderGoalsBalance(spheres, goals);
-    });
-
-    deleteSphereButton.type = "button";
-    deleteSphereButton.className = "task-action task-action-danger";
-    deleteSphereButton.textContent = "Удалить";
-    deleteSphereButton.addEventListener("click", () => {
-      const hasGoals = goals.some((goal) => goal.sphereId === sphere.id);
-
-      if (hasGoals) {
-        alert("Сначала удалите цели из этой сферы");
-        return;
-      }
-
-      const sphereIndex = spheres.findIndex((item) => item.id === sphere.id);
-
-      if (sphereIndex !== -1) {
-        spheres.splice(sphereIndex, 1);
-        saveAndRenderGoalsBalance(spheres, goals);
-      }
-    });
-
-    actions.append(createGoalButton, editSphereButton, deleteSphereButton);
-    header.append(title, actions);
-    card.append(header);
-
-    if (sphereGoals.length === 0) {
-      const emptyGoals = document.createElement("p");
-
-      emptyGoals.className = "goal-empty";
-      emptyGoals.textContent = "Целей в этой сфере пока нет.";
-      goalsList.append(emptyGoals);
-    } else {
-      sphereGoals.forEach((goal) => {
-        const goalItem = document.createElement("div");
-        const goalInfo = document.createElement("div");
-        const goalTitle = document.createElement("strong");
-        const goalTarget = document.createElement("span");
-        const deleteGoalButton = document.createElement("button");
-
-        goalItem.className = "goal-item";
-        goalInfo.className = "goal-info";
-        goalTitle.textContent = goal.title;
-        goalTarget.textContent = `${Number(goal.targetValue)} действий`;
-
-        deleteGoalButton.type = "button";
-        deleteGoalButton.className = "task-action task-action-danger";
-        deleteGoalButton.textContent = "Удалить";
-        deleteGoalButton.addEventListener("click", () => {
-          const goalIndex = goals.findIndex((item) => item.id === goal.id);
-
-          if (goalIndex !== -1) {
-            goals.splice(goalIndex, 1);
-            saveAndRenderGoalsBalance(spheres, goals);
-          }
-        });
-
-        goalInfo.append(goalTitle, goalTarget);
-        goalItem.append(goalInfo, deleteGoalButton);
-        goalsList.append(goalItem);
-      });
+    if (sphere.id === activeBalanceSphereId) {
+      tab.classList.add("is-active");
     }
 
-    card.append(goalsList);
-    spheresList.append(card);
+    tabs.append(tab);
   });
+
+  card.className = "sphere-card";
+  header.className = "sphere-header";
+  actions.className = "sphere-actions";
+  sphereProgressBlock.className = "balance-progress";
+  sphereProgressText.className = "balance-progress-text";
+  goalForm.className = "goal-form";
+  goalForm.dataset.sphereId = activeSphere.id;
+  goalsList.className = "goal-list";
+
+  title.textContent = activeSphere.name;
+  sphereProgressText.textContent = `${sphereProgress.progress}% (${sphereProgress.doneTasks} из ${sphereProgress.totalTasks} связанных задач)`;
+
+  goalTitleInput.className = "goal-title-input";
+  goalTitleInput.type = "text";
+  goalTitleInput.maxLength = 120;
+  goalTitleInput.placeholder = "Новая цель...";
+  goalTitleInput.setAttribute("aria-label", "Название новой цели");
+
+  goalDeadlineInput.className = "goal-deadline-input";
+  goalDeadlineInput.type = "date";
+  goalDeadlineInput.setAttribute("aria-label", "Дедлайн цели");
+
+  createGoalButton.type = "submit";
+  createGoalButton.className = "button button-secondary goal-submit";
+  createGoalButton.textContent = "Создать цель";
+  createGoalButton.disabled = true;
+
+  editSphereButton.type = "button";
+  editSphereButton.className = "task-action";
+  editSphereButton.textContent = "Редактировать";
+  editSphereButton.addEventListener("click", () => {
+    const nextNameInput = window.prompt("Название сферы", activeSphere.name);
+
+    if (nextNameInput === null) {
+      return;
+    }
+
+    const nextName = nextNameInput.trim();
+
+    if (!nextName) {
+      alert("Введите название сферы");
+      return;
+    }
+
+    activeSphere.name = nextName;
+    activeSphere.updatedAt = new Date().toISOString();
+    saveAndRenderGoalsBalance(spheres, goals);
+  });
+
+  deleteSphereButton.type = "button";
+  deleteSphereButton.className = "task-action task-action-danger";
+  deleteSphereButton.textContent = "Удалить";
+  deleteSphereButton.addEventListener("click", () => {
+    const hasGoals = goals.some((goal) => goal.sphereId === activeSphere.id);
+
+    if (hasGoals) {
+      alert("Сначала удалите цели из этой сферы");
+      return;
+    }
+
+    const sphereIndex = spheres.findIndex((item) => item.id === activeSphere.id);
+
+    if (sphereIndex !== -1) {
+      spheres.splice(sphereIndex, 1);
+      activeBalanceSphereId = spheres[0] ? spheres[0].id : null;
+      saveAndRenderGoalsBalance(spheres, goals);
+    }
+  });
+
+  actions.append(editSphereButton, deleteSphereButton);
+  header.append(title, actions);
+  goalForm.append(goalTitleInput, goalDeadlineInput, createGoalButton);
+  sphereProgressBlock.append(sphereProgressText, createBalanceProgressBar(sphereProgress.progress));
+  card.append(header, sphereProgressBlock, goalForm);
+
+  if (sphereGoals.length === 0) {
+    const emptyGoals = document.createElement("p");
+
+    emptyGoals.className = "goal-empty";
+    emptyGoals.textContent = "Целей в этой сфере пока нет.";
+    goalsList.append(emptyGoals);
+  } else {
+    sphereGoals.forEach((goal) => {
+      const goalProgress = calculateGoalProgress(goal, tasks);
+      const goalItem = document.createElement("div");
+      const goalInfo = document.createElement("div");
+      const goalTitle = document.createElement("strong");
+      const goalTarget = document.createElement("span");
+      const goalProgressBlock = document.createElement("div");
+      const goalProgressText = document.createElement("span");
+      const deleteGoalButton = document.createElement("button");
+
+      goalItem.className = "goal-item";
+      goalInfo.className = "goal-info";
+      goalProgressBlock.className = "goal-progress";
+      goalProgressText.className = "goal-progress-text";
+      goalTitle.textContent = goal.title;
+      goalTarget.textContent = `${goalProgress.doneTasks} из ${goalProgress.totalTasks} связанных задач`;
+      goalProgressText.textContent = `${goalProgress.progress}%`;
+      if (goal.deadline) {
+        goalTarget.textContent = `${goalTarget.textContent} · срок ${goal.deadline}`;
+      }
+
+      deleteGoalButton.type = "button";
+      deleteGoalButton.className = "task-action task-action-danger";
+      deleteGoalButton.textContent = "Удалить";
+      deleteGoalButton.addEventListener("click", () => {
+        const goalIndex = goals.findIndex((item) => item.id === goal.id);
+
+        if (goalIndex !== -1) {
+          goals.splice(goalIndex, 1);
+          saveAndRenderGoalsBalance(spheres, goals);
+        }
+      });
+
+      goalProgressBlock.append(goalProgressText, createBalanceProgressBar(goalProgress.progress));
+      goalInfo.append(goalTitle, goalTarget, goalProgressBlock);
+      goalItem.append(goalInfo, deleteGoalButton);
+      goalsList.append(goalItem);
+    });
+  }
+
+  card.append(goalsList);
+  spheresList.append(tabs, card);
+}
+
+function updateGoalFormState(goalForm) {
+  const titleInput = goalForm.querySelector(".goal-title-input");
+  const deadlineInput = goalForm.querySelector(".goal-deadline-input");
+  const submitButton = goalForm.querySelector(".goal-submit");
+  const title = titleInput ? titleInput.value.trim() : "";
+  const deadline = deadlineInput ? deadlineInput.value : "";
+
+  if (submitButton) {
+    submitButton.disabled = !title || !deadline;
+  }
 }
 
 function startTaskEditing({ titleButton, task, tasks, selectedDate }) {
@@ -966,16 +1087,24 @@ function startTaskEditing({ titleButton, task, tasks, selectedDate }) {
 function renderTasks(tasks, selectedDate) {
   const taskList = document.querySelector(".task-list");
   const taskCount = document.querySelector(".task-count");
+  const tasksTitle = document.querySelector("#tasks-title");
+  const spheres = loadSpheres();
+  const goals = loadGoals();
+  const { start, end } = getActivePeriodRange();
 
   if (!taskList) {
     return;
   }
 
   const visibleTasks = tasks.filter((task) => (
-    task.date === selectedDate && task.status !== "overdue"
+    task.date >= start && task.date <= end && task.status !== "overdue"
   ));
 
   taskList.textContent = "";
+
+  if (tasksTitle) {
+    tasksTitle.textContent = "Задачи за период";
+  }
 
   if (taskCount) {
     taskCount.textContent = `${visibleTasks.length} ${getTaskWord(visibleTasks.length)}`;
@@ -984,7 +1113,7 @@ function renderTasks(tasks, selectedDate) {
   if (visibleTasks.length === 0) {
     const emptyState = document.createElement("p");
     emptyState.className = "task-empty";
-    emptyState.textContent = "На сегодня свободно. Самое время выбрать один спокойный фокус.";
+    emptyState.textContent = "За выбранный период задач нет.";
     taskList.append(emptyState);
     return;
   }
@@ -1000,6 +1129,7 @@ function renderTasks(tasks, selectedDate) {
 
     const content = document.createElement("div");
     const title = document.createElement("button");
+    const goalBadge = document.createElement("p");
     const meta = document.createElement("p");
     const controls = document.createElement("div");
     const priorityButton = document.createElement("button");
@@ -1018,6 +1148,13 @@ function renderTasks(tasks, selectedDate) {
 
     meta.className = "task-meta";
     meta.textContent = `${getStatusLabel(task.status)} · ${getPriorityLabel(task.priority)} · ${getRepeatLabel(task.repeatType)}`;
+
+    const goalLabel = getGoalLabel(task.goalId, spheres, goals);
+
+    if (goalLabel) {
+      goalBadge.className = "task-goal-badge";
+      goalBadge.textContent = goalLabel;
+    }
 
     priorityButton.type = "button";
     priorityButton.className = `priority-toggle priority-toggle-${task.priority || "medium"}`;
@@ -1072,21 +1209,26 @@ function renderTasks(tasks, selectedDate) {
     controls.className = "task-controls";
     controls.append(priorityButton, statusSelect, editButton, deleteButton);
 
-    content.append(title, meta);
+    content.append(title);
+
+    if (goalLabel) {
+      content.append(goalBadge);
+    }
+
+    content.append(meta);
     card.append(content, controls);
     taskList.append(card);
   });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  const backlogToggle = document.querySelector(".backlog-toggle");
-  const backlogToggleLabel = document.querySelector(".backlog-toggle-label");
   const backlog = document.querySelector("#backlog");
-  const balanceToggle = document.querySelector(".balance-toggle");
-  const balanceToggleLabel = document.querySelector(".balance-toggle-label");
-  const balance = document.querySelector("#balance");
   const sphereForm = document.querySelector(".sphere-form");
+  const spheresList = document.querySelector(".spheres-list");
+  const periodStartInput = document.querySelector(".period-start-input");
+  const periodEndInput = document.querySelector(".period-end-input");
   const taskForm = document.querySelector(".task-form");
+  const taskDateInput = document.querySelector(".task-date-input");
   const todayButton = document.querySelector(".today-button");
   const storage = initializeStorage();
   let isAddLocked = false;
@@ -1110,12 +1252,27 @@ document.addEventListener("DOMContentLoaded", () => {
     generateRecurringTasks(storage.tasks, storage.settings.selectedDate);
     checkOverdueTasks(storage.tasks);
     renderSelectedDate(storage.settings.selectedDate);
-    renderWeek(storage.settings.selectedDate, selectDate);
     renderTasks(storage.tasks, storage.settings.selectedDate);
     renderBacklog(storage.tasks, storage.settings.selectedDate);
-    renderWeekProgress(storage.tasks, storage.settings.selectedDate);
+    renderWeekProgress(storage.tasks);
+    renderPeriodSummary(storage.tasks, storage.goals);
     syncTodayButtonState();
   };
+
+  currentPeriodStart = storage.settings.selectedDate;
+  currentPeriodEnd = storage.settings.selectedDate;
+
+  if (periodStartInput) {
+    periodStartInput.value = currentPeriodStart;
+  }
+
+  if (periodEndInput) {
+    periodEndInput.value = currentPeriodEnd;
+  }
+
+  if (taskDateInput) {
+    taskDateInput.value = getTodayLocalDateString();
+  }
 
   selectDate(storage.settings.selectedDate);
   renderGoalsBalance(storage.spheres, storage.goals);
@@ -1132,10 +1289,10 @@ document.addEventListener("DOMContentLoaded", () => {
     generateRecurringTasks(storage.tasks, storage.settings.selectedDate);
     checkOverdueTasks(storage.tasks);
     renderSelectedDate(storage.settings.selectedDate);
-    renderWeek(storage.settings.selectedDate, selectDate);
     renderTasks(storage.tasks, storage.settings.selectedDate);
     renderBacklog(storage.tasks, storage.settings.selectedDate);
-    renderWeekProgress(storage.tasks, storage.settings.selectedDate);
+    renderWeekProgress(storage.tasks);
+    renderPeriodSummary(storage.tasks, storage.goals);
     syncTodayButtonState();
   };
 
@@ -1150,8 +1307,39 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      currentPeriodStart = today;
+      currentPeriodEnd = today;
+
+      if (periodStartInput) {
+        periodStartInput.value = today;
+      }
+
+      if (periodEndInput) {
+        periodEndInput.value = today;
+      }
+
+      if (taskDateInput) {
+        taskDateInput.value = today;
+      }
+
       selectDate(today);
     });
+  }
+
+  const handlePeriodInput = () => {
+    currentPeriodStart = periodStartInput && periodStartInput.value ? periodStartInput.value : getTodayLocalDateString();
+    currentPeriodEnd = periodEndInput && periodEndInput.value ? periodEndInput.value : currentPeriodStart;
+    renderTasks(storage.tasks, storage.settings.selectedDate);
+    renderWeekProgress(storage.tasks);
+    renderPeriodSummary(storage.tasks, storage.goals);
+  };
+
+  if (periodStartInput) {
+    periodStartInput.addEventListener("change", handlePeriodInput);
+  }
+
+  if (periodEndInput) {
+    periodEndInput.addEventListener("change", handlePeriodInput);
   }
 
   if (taskForm) {
@@ -1162,6 +1350,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const taskSelects = taskForm.querySelectorAll(".task-select");
       const prioritySelect = taskSelects[0];
       const repeatSelect = taskSelects[1];
+      const goalSelect = taskSelects[2];
       const submitButton = taskForm.querySelector("button[type='submit']");
 
       if (isAddLocked) {
@@ -1196,9 +1385,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const task = createTask({
         text,
-        selectedDate: storage.settings.selectedDate,
+        selectedDate: taskDateInput && taskDateInput.value ? taskDateInput.value : getTodayLocalDateString(),
         priority: prioritySelect ? prioritySelect.value : "medium",
         repeatType: repeatSelect ? repeatSelect.value : "none",
+        goalId: goalSelect && goalSelect.value ? goalSelect.value : null,
       });
 
       storage.tasks.push(task);
@@ -1231,6 +1421,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const now = new Date().toISOString();
 
+      storage.spheres = loadSpheres();
+      storage.goals = loadGoals();
       storage.spheres.push({
         id: generateEntityId("sphere"),
         name,
@@ -1246,29 +1438,79 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  if (backlogToggle && backlog) {
-    backlogToggle.addEventListener("click", () => {
-      const isHidden = backlog.hasAttribute("hidden");
+  if (spheresList) {
+    spheresList.addEventListener("click", (event) => {
+      const sphereTab = event.target.closest(".sphere-tab");
 
-      backlog.toggleAttribute("hidden", !isHidden);
-      backlogToggle.setAttribute("aria-expanded", String(isHidden));
-
-      if (backlogToggleLabel) {
-        backlogToggleLabel.textContent = isHidden ? "Скрыть Бэклог" : "Открыть Бэклог";
+      if (!sphereTab) {
+        return;
       }
+
+      activeBalanceSphereId = sphereTab.dataset.sphereId;
+      renderGoalsBalance(loadSpheres(), loadGoals());
+    });
+
+    spheresList.addEventListener("input", (event) => {
+      const goalForm = event.target.closest(".goal-form");
+
+      if (!goalForm) {
+        return;
+      }
+
+      updateGoalFormState(goalForm);
+    });
+
+    spheresList.addEventListener("submit", (event) => {
+      const goalForm = event.target.closest(".goal-form");
+
+      if (!goalForm) {
+        return;
+      }
+
+      event.preventDefault();
+
+      const titleInput = goalForm.querySelector(".goal-title-input");
+      const deadlineInput = goalForm.querySelector(".goal-deadline-input");
+      const sphereId = goalForm.dataset.sphereId;
+      const goalTitle = titleInput ? titleInput.value.trim() : "";
+      const deadline = deadlineInput ? deadlineInput.value : "";
+
+      if (!goalTitle) {
+        alert("Введите название цели");
+
+        if (titleInput) {
+          titleInput.focus();
+        }
+
+        return;
+      }
+
+      if (!deadline) {
+        alert("Выберите дедлайн цели");
+
+        if (deadlineInput) {
+          deadlineInput.focus();
+        }
+
+        return;
+      }
+
+      storage.spheres = loadSpheres();
+      storage.goals = loadGoals();
+
+      const sphereExists = storage.spheres.some((sphere) => sphere.id === sphereId);
+
+      if (!sphereExists) {
+        return;
+      }
+
+      storage.goals.push(createGoal({
+        sphereId,
+        title: goalTitle,
+        deadline,
+      }));
+      saveAndRenderGoalsBalance(storage.spheres, storage.goals);
     });
   }
 
-  if (balanceToggle && balance) {
-    balanceToggle.addEventListener("click", () => {
-      const isHidden = balance.hasAttribute("hidden");
-
-      balance.toggleAttribute("hidden", !isHidden);
-      balanceToggle.setAttribute("aria-expanded", String(isHidden));
-
-      if (balanceToggleLabel) {
-        balanceToggleLabel.textContent = isHidden ? "Скрыть Цели и Баланс" : "Цели и Баланс";
-      }
-    });
-  }
 });
